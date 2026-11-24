@@ -1,0 +1,408 @@
+\documentclass[11pt]{amsart}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage[margin=1.1in]{geometry}
+\usepackage{hyperref}
+\hypersetup{pdftitle={Two of Schnorr's gate elimination bounds, machine-checked in Lean 4},
+  pdfauthor={Santiago Gegenschatz}}
+\usepackage{fancyvrb}
+\usepackage[no-math]{fontspec}
+% Lean source is Unicode; Menlo has every symbol the listings use.
+\newfontfamily\leanfont{Menlo}[Scale=0.82]
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\lean}[1]{\texttt{#1}}
+\emergencystretch=3em
+\DefineVerbatimEnvironment{leancode}{Verbatim}{formatcom=\leanfont,xleftmargin=1.5em}
+
+\title[Two gate elimination bounds in Lean 4]{Two of Schnorr's gate elimination bounds,
+machine-checked in Lean 4}
+\author{Santiago Gegenschatz}
+\address{Independent researcher}
+\email{santy@lebenmaster.com}
+\date{Draft, 24 November 2026. Not peer reviewed. The Lean code and this note were written by
+an AI assistant (Claude Fable 5.2, in Claude Code) under the author's direction.}
+
+\begin{document}
+
+\begin{abstract}
+A Boolean circuit whose gates are two-input functions other than XOR and XNOR needs exactly
+$3(n-1)$ gates to compute the parity of $n$ inputs. With every two-input gate allowed,
+deciding whether at least two of $n$ inputs are on needs at least $2n-3$ gates, and so does
+any function that keeps mixing each pair of its free inputs while inputs are fixed one at a
+time. Both bounds go back to Schnorr in the 1970s; the general condition in the second is our
+variant of his. We give proofs of both checked by the Lean~4 proof assistant. The development is 2{,}395 lines, uses only the Lean core library (no Mathlib), has
+no \lean{sorry}, depends only on the three standard axioms, and passes a replay through Lean's
+kernel and one independently written proof checker. The theorems are not new. What we offer is the machine check and a way of arranging
+the proofs that made them short: gates are never removed and wires are never renumbered; a
+gate that has become useless is overwritten in place by a free node. We found no earlier
+machine check of these bounds, but we cannot rule one out. The code and the text were written
+by an AI assistant under the author's direction. A separate AI referee pass re-ran the checks
+and tested the definitions on small circuits. No human has checked the definitions line by
+line.
+\end{abstract}
+
+\maketitle
+
+\section{What is proved}
+
+A circuit has $n$ input wires. Each gate applies a function $\{0,1\}^2\to\{0,1\}$ to two
+earlier wires and adds one new wire. The last wire is the output, and the size is the number
+of gates. Of the sixteen two-input functions, call XOR and XNOR \emph{XOR-like}. The other
+fourteen, which include the constants and the functions of one argument, form the basis
+usually written $U_2$.
+
+\begin{theorem}[Schnorr; Lean: \lean{parity\_exact\_without\_xor}]\label{thm:main}
+Every circuit on $n$ inputs with no XOR-like gate that computes
+$x_1\oplus\dots\oplus x_n$ has at least $3(n-1)$ gates, and some such circuit has exactly
+$3(n-1)$ gates.
+\end{theorem}
+
+Here is the statement as Lean accepts it.
+
+\begin{leancode}
+theorem parity_exact_without_xor (n : Nat) :
+    (∀ c : Circuit, c.inputs = n → (∀ g, g ∈ c.gates → ¬IsXorLike g.op) →
+        c.Computes parity → 3 * (n - 1) ≤ c.size) ∧
+      ∃ c : Circuit, c.inputs = n ∧ (∀ g, g ∈ c.gates → ¬IsXorLike g.op) ∧
+        c.Computes parity ∧ c.size = 3 * (n - 1)
+\end{leancode}
+
+The Lean statement has no condition on $n$; for $n=0$ and $n=1$ it says that no gate is needed.
+
+The theorem is attributed to Schnorr. Carmosino, Dang and Jackman \cite[Theorem~18]{CDJ26}
+cite \cite{Schnorr74} for the $3(n-1)$ bound over AND, OR and NOT. Theorem~\ref{thm:main} is
+the wider form, with all fourteen gates that are not XOR-like. We believe that form is due to
+\cite{Schnorr76}, whose title names the equivalence function (the negation of parity), but we
+have not confirmed the basis used there. We checked that both references exist and have read
+neither. The argument is the standard one (fix one input,
+three gates die). We wrote the proof from that outline and did not follow any written proof
+line by line.
+
+\begin{theorem}[after Schnorr; Lean: \lean{atLeastTwo\_needs\_two\_gates\_per\_input}]\label{thm:two}
+Every circuit on $n$ inputs, with any two-input gates, that decides whether at least two of
+its inputs are on has at least $2n-3$ gates.
+\end{theorem}
+
+\begin{leancode}
+theorem atLeastTwo_needs_two_gates_per_input (c : Circuit)
+    (hc : c.Computes atLeastTwo) : 2 * c.inputs - 3 ≤ c.size
+\end{leancode}
+
+The names of the second development live in the namespace \lean{PNP.Full}; we print them
+without the prefix.
+
+This is an instance of a general statement, Theorem~\ref{thm:hard} below. Its hypothesis is our
+own formulation. It is modelled on the condition attributed to Schnorr: every two inputs leave
+at least three subfunctions, and this survives the fixing of inputs. Ours asks a little more
+(dependence on every free input, and a fixing step all the way down to two free inputs), so it
+covers fewer functions. For example, no family makes the three-input multiplexer hard in our
+sense, because fixing its selector leaves a function of one input. The abstract of
+\cite{Schnorr74} describes a linear lower bound that depends on the set of subfunctions, and we
+take that paper to be the source. We have not read it, and we have not checked against any
+source that the bound is stated there as $2n-3$ or that this threshold function is among its
+examples. For $n=2$ the bound is met by one AND gate (\lean{andPair\_computes\_atLeastTwo}).
+We did not formalize an upper bound for larger $n$.
+
+\subsection*{Why check it}
+Gate elimination is the method behind the linear lower bounds for general circuits, from
+$2n$ to a recent claim of $4n-O(\log n)$ \cite{MS26}, and its proofs are long case analyses. Carmosino, Dang and Jackman
+\cite{CDJ26} name as a research direction to ``formalize known gate elimination arguments in
+standard proof assistants'' and re-prove the $3(n-1)$ bound on paper with that aim. This note is one
+step in that direction: the two smallest gate elimination proofs that have the full shape of
+the big ones (pick a gate, fix an input, count the gates that die, repeat).
+
+\subsection*{What we searched}
+Eleven web searches in November 2026, in two separate passes, found no proof-assistant check of
+these bounds or of any other gate elimination lower bound. Circuit lower bounds proved by other
+methods have been formalized: parity for bounded-depth circuits in Lean \cite{ParityAC0}, and
+the monotone bound for clique in Isabelle/HOL \cite{Thiemann22}. We searched the Archive of
+Formal Proofs and GitHub only through web search. So ``first'' is a claim we do not make.
+
+\section{The model, exactly}
+
+A reader who wants to trust Theorems~\ref{thm:main} and~\ref{thm:two} needs to check only this
+section against the files. Everything else is checked by Lean. The listing gathers the
+definitions from four files (\lean{Circuit}, \lean{Parity}, \lean{NoXor}, \lean{Threshold}),
+in namespaces \lean{PNP}, \lean{PNP.Circuit} and \lean{PNP.Full}, with the comments removed.
+
+\begin{leancode}
+structure Gate where
+  op : Bool → Bool → Bool
+  left : Nat
+  right : Nat
+
+structure Circuit where
+  inputs : Nat
+  gates : List Gate
+
+def size (c : Circuit) : Nat := c.gates.length
+
+def WellFormed (c : Circuit) : Prop :=
+  ∀ (i : Nat) (h : i < c.gates.length),
+    c.gates[i].left < c.inputs + i ∧ c.gates[i].right < c.inputs + i
+
+def fire (wires : List Bool) (g : Gate) : List Bool :=
+  wires ++ [g.op (wires.getD g.left false) (wires.getD g.right false)]
+
+def wires (c : Circuit) (x : List Bool) : List Bool := c.gates.foldl fire x
+def eval (c : Circuit) (x : List Bool) : Bool := (c.wires x).getLastD false
+
+def Computes (c : Circuit) (f : List Bool → Bool) : Prop :=
+  c.WellFormed ∧ ∀ x : List Bool, x.length = c.inputs → c.eval x = f x
+
+def parity : List Bool → Bool
+  | [] => false
+  | b :: bs => b != parity bs
+
+def IsXorLike (op : Bool → Bool → Bool) : Prop :=
+  (∀ a b, op a b = (a != b)) ∨ (∀ a b, op a b = (a == b))
+
+def ones : List Bool → Nat
+  | [] => 0
+  | b :: bs => (if b then 1 else 0) + ones bs
+
+def atLeastTwo (x : List Bool) : Bool := decide (2 ≤ ones x)
+\end{leancode}
+
+Choices a referee should know about.
+\begin{itemize}
+\item Wires are numbered $0,\dots,n-1$ for the inputs and $n+t$ for gate $t$. A gate may read
+  any earlier wire, so fan-out is unbounded, and it may read the same wire twice.
+\item The output is the last wire. For a lower bound this loses nothing: if the output of a
+  circuit is an earlier gate, deleting the gates after it gives a smaller circuit in our
+  model. With no gates at all the output is the last input, which is the right answer for
+  $n=1$.
+\item Size counts every gate, including gates that compute a constant, a copy or a negation
+  of one argument. Counting them makes the lower bound weaker than the one we prove inside
+  (Theorem~\ref{thm:and}), where they are free.
+\item Subtraction on \lean{Nat} is truncated, so for $n=0$ the bound reads $0\le$ size.
+\end{itemize}
+
+\section{The proof of the $3(n-1)$ bound}
+
+\subsection{Nodes instead of gates}
+A gate that is not XOR-like is one of three things. Lean checks this by a table of the sixteen
+truth tables (\lean{classify}, \lean{exists\_kind}).
+
+\begin{leancode}
+inductive Kind where
+  | and (a b c : Bool)   -- ((x != a) && (y != b)) != c
+  | copyL (e : Bool)     -- x != e
+  | copyR (e : Bool)     -- y != e
+  | const (d : Bool)     -- d
+\end{leancode}
+
+A \emph{node} is a kind with two wire numbers. The eight \lean{and} kinds are AND with any
+choice of negations on the two inputs and the output; this covers AND, OR, NAND, NOR, the
+two implications and their two negations. The \emph{cost} of a list of nodes is the number of \lean{and} nodes. Copies,
+negations and constants are free.
+
+\begin{theorem}[Lean: \lean{and\_gates\_for\_xor}]\label{thm:and}
+Let $N$ be a well-formed list of nodes on $n$ inputs. Let $P$ be a nonempty set of inputs in which the
+positions in a list $F$ vary freely and every other position is held at a fixed value. If the
+last wire of $N$ equals $\bigoplus_{i\in F}x_i$ or its negation on all of $P$, then
+$N$ has at least $3(|F|-1)$ \lean{and} nodes.
+\end{theorem}
+
+Theorem~\ref{thm:main} follows with $F=\{0,\dots,n-1\}$ and $P$ all inputs of length $n$,
+because cost is at most size.
+
+\subsection{Never delete, overwrite}
+On paper, gate elimination removes gates and rewires the circuit. In a proof assistant that
+means renumbering every wire after each removal, and most of the work goes into the
+renumbering. We avoid it. The list of nodes keeps its length and every wire keeps its number
+for the whole proof. Two things change instead.
+\begin{itemize}
+\item \emph{Fixing an input} does not touch the circuit. It shrinks the set $P$ of inputs on
+  which the circuit is required to be correct (\lean{fixInput}, \lean{Cube.restrict}).
+\item \emph{Killing a gate} overwrites one \lean{and} node by a free node. Call an \lean{and}
+  node \emph{dead on $P$} if one of the two wires it reads is constant on $P$. A dead node
+  agrees on $P$ with a copy of its other argument or with a constant, so it can be overwritten
+  with every wire value on $P$ unchanged and the cost one lower (\lean{kill\_one}). Three
+  distinct dead nodes give cost three lower (\lean{kill\_three}).
+\end{itemize}
+
+Because copies are free, the proof needs to see through them. \lean{Alias n N s w e} says
+that wire $w$ is wire $s$ passed through a chain of copy nodes, negated in total $e$ times
+modulo two. Three lemmas about it carry the argument.
+\begin{itemize}
+\item \lean{exists\_root}: every wire is an alias of an input, of an \lean{and} node, or of
+  a constant node.
+\item \lean{flow}: take two runs whose inputs differ only at wire $s$ and whose node lists
+  differ only at the node of wire $s$. If every other \lean{and} node that reads an alias of
+  $s$ takes the same value in both runs, then so does every wire that is not an alias of $s$.
+  (In the induction below $s$ is an input and the two lists are equal;
+  \lean{reader\_or\_useless} uses the general form.)
+\item \lean{reader\_or\_useless}: for an \lean{and} node $g$, either another \lean{and} node
+  reads an alias of $g$, or the output is an alias of $g$, or some list of the same length with one \lean{and}
+  node fewer has the same output on every input.
+\end{itemize}
+
+\subsection{The induction}
+The proof of Theorem~\ref{thm:and} is by strong induction on the cost, for all $F$ and $P$ at
+once. If $|F|\le 1$ there is nothing to prove. Whenever some \lean{and} node can be overwritten
+with the output unchanged on $P$, the induction hypothesis for the same $F$ and $P$ finishes.
+We call that an \emph{easy exit}. Otherwise:
+
+\begin{enumerate}
+\item There is an \lean{and} node; without one the output would be an alias of one input or a
+  constant, and the XOR of two free inputs is neither. Let $g$ be the first one. Both wires it
+  reads lie before every \lean{and} node, so each is a constant (easy exit) or an alias of an
+  input. Say they are aliases of inputs $i$ and $j$.
+\item If $i=j$, then $g$ computes a function of one input and is overwritten by a copy or a
+  constant (easy exit). If $i$ or $j$ is not in $F$, it is constant on $P$ and $g$ is dead
+  (easy exit). So $i\ne j$ and both are free.
+\item A second \lean{and} node $h\ne g$ reads an alias of $i$. If none did, set $x_j$ to the
+  value that forces $g$ and flip $x_i$: the output of $g$ stays put, so by \lean{flow} nothing
+  but aliases of $i$ would change. The output is not an alias of $i$ (it depends on $j$ as
+  well), so the output would not change. But the output is the XOR of the free inputs and $i$
+  is free.
+\item Fix $x_i$ to the value that forces the output of $g$. Now $P$ is smaller, $F$ has lost
+  $i$, and the last wire still computes the XOR of the remaining free inputs up to negation.
+  Nodes $g$ and $h$ each read a stuck wire and are dead.
+\item The output of $g$ is now constant. By \lean{reader\_or\_useless}, either an \lean{and}
+  node $p$ reads an alias of $g$, or the output is an alias of $g$ and so constant
+  (impossible, since $j$ is still free), or there is an easy exit. Node $p$ comes after $g$ and is dead.
+\item If $p\ne h$, the nodes $g,h,p$ are three distinct dead nodes. If $p=h$, then $h$ reads
+  an alias of $i$ and an alias of $g$, both constant now, so the output of $h$ is constant
+  too. Apply \lean{reader\_or\_useless} to $h$: some \lean{and} node $q$ after $h$ reads an
+  alias of $h$ and is dead, and $g,h,q$ are distinct.
+\item Overwrite the three dead nodes. The cost drops by three, $|F|$ drops by one, and the
+  induction hypothesis gives $3(|F|-2)\le \text{cost}-3$.
+\end{enumerate}
+
+In Lean this is one proof of about 190 lines (\lean{Schnorr.lean}).
+
+\subsection{The matching circuit}
+Write $x\oplus y=(x\wedge\neg y)\vee(\neg x\wedge y)$: three gates, none XOR-like. Chaining
+$n-1$ of these gives a circuit of size $3(n-1)$, and Lean checks that it is well formed, has
+no XOR-like gate and computes parity (\lean{andChain}, \lean{andChain\_computes\_parity}).
+
+\section{The $2n-3$ bound}
+
+Now every two-input function is a gate. The same overwrite-in-place setup is built once more
+with a node that is an arbitrary gate, a copy or a constant (\lean{FullBasis.lean},
+\lean{FullAlias.lean}). The one fact about gates that the proof uses is that a gate with one
+wire stuck is a function of its other wire, so it is a copy or a constant. That holds for XOR
+as well as for AND, which is why fixing an input here kills two gates and not three.
+
+Let $P$ be a set of allowed inputs with free positions $F$, as before. Say that $f$
+\emph{mixes} positions $i$ and $j$ on $P$ if no single bit computed from $x_i$ and $x_j$ is
+enough for $f$:
+
+\begin{leancode}
+def Mixes (P : List Bool → Prop) (f : List Bool → Bool) (i j : Nat) : Prop :=
+  ∀ b : Bool → Bool → Bool, ∃ x x', P x ∧ P x' ∧
+    (∀ w, w ≠ i → w ≠ j → x.getD w false = x'.getD w false) ∧
+    b (x.getD i false) (x.getD j false) = b (x'.getD i false) (x'.getD j false) ∧
+    f x ≠ f x'
+\end{leancode}
+
+This says the same as the usual condition: the four ways of fixing $x_i$ and $x_j$ leave at
+least three different functions of the other inputs. (If they left at most two, the bit that
+says which of the two would be enough; and a bit that is enough leaves at most two.) We did not
+formalize this equivalence.
+
+A family $Q$ of pairs $(F,P)$ is \emph{hard for $f$} (\lean{Hard}) if on each of its members
+$f$ depends on every free position when $|F|\ge 2$, mixes every two free positions when
+$|F|\ge 3$, and, when $|F|\ge 3$, each free position can be fixed to some value so that the
+restricted pair is again in $Q$.
+
+\begin{theorem}[Lean: \lean{hard\_needs\_two\_per\_input}]\label{thm:hard}
+If $Q$ is hard for $f$ and contains the pair of all positions and all inputs of length $n$,
+then every circuit on $n$ inputs that computes $f$ has at least $2n-3$ gates.
+\end{theorem}
+
+The proof is by strong induction on the number of gates. Easy exits are as in Section~3. If
+$|F|=2$ the claim is one gate, and a circuit with no gate outputs a copy of one input or a
+constant. Otherwise let $g$ be the first gate; it reads aliases of two free inputs $i\ne j$.
+\begin{enumerate}
+\item The output is not an alias of $i$ or of $j$: the bit $x_i$ alone, or $x_j$ alone, would
+  then be enough for $f$, and $f$ mixes $i$ and $j$.
+\item Some gate $h\ne g$ reads an alias of $i$ or of $j$. If none did, apply \lean{Mixes} to
+  the bit that $g$ puts out: two inputs agree outside $i,j$ and on that bit. By \lean{flow},
+  now with the two sources $i$ and $j$, every wire that is not an alias of $i$ or $j$ agrees on
+  the two inputs, so the output does. But $f$ differs on them.
+\item Say $h$ reads an alias of $s\in\{i,j\}$. Fix $x_s$ to the value hardness provides. Both
+  $g$ and $h$ read a stuck wire and are dead. Overwrite them: the cost drops by two and
+  $|F|$ by one.
+\end{enumerate}
+
+For Theorem~\ref{thm:two}, $Q$ is the family of pairs in which the all-off input is allowed,
+so every fixed input is off. With $x_i=x_j=0$ the other inputs must supply two ones, with
+exactly one of them on they must supply one, and with both on nothing is needed. A third free
+input tells these three apart (\lean{Threshold.lean}).
+
+\section{How it was checked}
+
+\begin{itemize}
+\item Lean 4.36.0, core library only. The whole project builds in a few seconds on a laptop.
+\item The Lean source and the source of this note are public:
+  \url{https://github.com/santy-gegenschatz/gate-elimination-lean}. The file
+  \lean{Axioms.lean} there prints the axioms of the three theorems.
+\item \lean{\#print axioms} for Theorems~\ref{thm:main}, \ref{thm:two} and~\ref{thm:hard} reports \lean{propext},
+  \lean{Classical.choice} and \lean{Quot.sound}, and nothing else.
+\item A text scan of the source finds no \lean{sorry}, \lean{axiom}, \lean{native\_decide},
+  \lean{unsafe}, \lean{implemented\_by}, \lean{extern}, \lean{opaque} or \lean{partial}.
+\item \lean{leanchecker}, which replays every compiled module through Lean's kernel, accepts
+  the whole library.
+\item \lean{nanoda}, a proof checker written independently in Rust, checked the 2{,}694
+  declarations the three theorems depend on, exported with \lean{lean4export}, with no errors.
+  These are the checks that were applied by others to the Lean proof of the generalized
+  Riemann hypothesis announced in November 2026 \cite{Rubinstein26}; we copied the list from there.
+\item For the first bound the matching circuit is a control on the statement: a lower bound stated too strongly
+  would contradict it inside Lean.
+\item The files, in dependency order: \lean{Circuit}, \lean{Reads}, \lean{Parity},
+  \lean{AndBasis}, \lean{Alias}, \lean{Kill}, \lean{Cube}, \lean{Schnorr}, \lean{NoXor},
+  \lean{Tight} for the first bound, then \lean{FullBasis}, \lean{FullAlias}, \lean{TwoN},
+  \lean{Threshold} for the second; 2{,}395 lines in total. \lean{Reads} and \lean{Parity} hold earlier folklore
+  results (with XOR gates allowed, parity needs exactly $n-1$ gates) and are used here only
+  for the definition of \lean{parity} and a few list lemmas.
+\end{itemize}
+
+\section{Limits of this note}
+
+\begin{itemize}
+\item The theorems are about fifty years old. Nothing here moves any lower bound.
+\item A machine check proves that the Lean statement follows from the Lean definitions. That
+  the definitions say what Section~2 claims has been checked by the AI assistant that wrote
+  them and by one separate AI referee pass, which was asked to break the note, re-ran every
+  check in Section~5 and ran the definitions on small circuits. No
+  human has checked them line by line.
+\item Theorem~\ref{thm:hard} is stated for our own class of hard functions. We have not compared
+  it clause by clause with a published statement of Schnorr's class.
+\item The search for earlier formalizations was a web search, not a survey.
+\item The two developments share their shape but not their code: the nodes of the first have
+  no XOR gate, the nodes of the second have arbitrary gates. Unifying them is left for the next
+  bound.
+\item Both bounds are far from the frontier. For the full basis a bound of $4n-O(\log n)$ was
+  claimed in November 2026 \cite{MS26}; it is not yet refereed. The plan is to carry the same
+  setup up the line of gate elimination bounds.
+\end{itemize}
+
+\begin{thebibliography}{9}
+\bibitem{CDJ26} M.~Carmosino, N.~Dang, T.~Jackman, \emph{Convergent gate elimination and
+  constructive circuit lower bounds}, arXiv:2602.17942, 2026.
+\bibitem{MS26} O.~S.~Mishra, R.~Santhanam, \emph{An explicit $4n-O(\log n)$ size lower bound
+  against general Boolean circuits}, ECCC report TR26-260, revision~1, 3 November 2026.
+\bibitem{ParityAC0} S.~Wesonga, \emph{Formalizing PARITY circuit lower bounds in Lean},
+  arXiv:2609.24188, 2026.
+\bibitem{Rubinstein26} M.~Rubinstein, \emph{Alp\"oge/Claude proof of the Generalized Riemann
+  Hypothesis}, web page, November 2026,
+  \url{https://www.math.uwaterloo.ca/~mrubinst/alpoge_claude_grh/}.
+\bibitem{Schnorr74} C.~P.~Schnorr, \emph{Zwei lineare untere Schranken f\"ur die Komplexit\"at
+  Boolescher Funktionen}, Computing \textbf{13} (1974), no.~2, 155--171.
+\bibitem{Schnorr76} C.~P.~Schnorr, \emph{The combinational complexity of equivalence},
+  Theoretical Computer Science \textbf{1} (1976), no.~4, 289--295.
+\bibitem{Thiemann22} R.~Thiemann, \emph{Clique is not solvable by monotone circuits of
+  polynomial size}, Archive of Formal Proofs, May 2022,
+  \url{https://isa-afp.org/entries/Clique_and_Monotone_Circuits.html}.
+\end{thebibliography}
+
+\end{document}
